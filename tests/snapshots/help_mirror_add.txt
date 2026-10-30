@@ -1,0 +1,28 @@
+Add a mirror from a new URL or an existing Git remote
+
+Usage: git-replicate mirror add [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  Short mirror name (letters, digits, '-' and '_')
+
+Options:
+      --uiless           Emit one JSON object per line (JSONL) on stdout; never prompt [env: GIT_REPLICATE_UILESS=]
+      --url <URL>        SSH or HTTPS URL; creates local remote gitreplicate-NAME
+      --remote <REMOTE>  Adopt an existing Git remote
+      --verbose          Print redacted diagnostics to stderr
+      --no-color         Disable colored output (NO_COLOR and CLICOLOR=0 are also honored)
+  -h, --help             Print help
+
+DESCRIPTION
+    --url creates the local remote gitreplicate-NAME; --remote adopts an existing
+    remote. The expected push URL is recorded in .gitreplicate.
+
+EXAMPLES
+    git-replicate mirror add gitlab --url git@gitlab.com:team/project.git
+    git-replicate mirror add work --remote existing-work-remote
+
+SAFETY
+    URLs with embedded credentials, http://, file://, git://, ext:: or local
+    paths are rejected. Name collisions and using the primary as a mirror are
+    refused. Only resources created by this command are rolled back on error.
+    Never contacts the network.

@@ -1,0 +1,29 @@
+Install the tool-owned pre-push hook (never overwrites existing hooks)
+
+Usage: git-replicate hook install [OPTIONS] <EVENT>
+
+Arguments:
+  <EVENT>  Hook event [possible values: pre-push]
+
+Options:
+      --strict    Block the primary push when a mirror fails (mirrors may already have changed)
+      --uiless    Emit one JSON object per line (JSONL) on stdout; never prompt [env: GIT_REPLICATE_UILESS=]
+      --verbose   Print redacted diagnostics to stderr
+      --no-color  Disable colored output (NO_COLOR and CLICOLOR=0 are also honored)
+  -h, --help      Print help
+
+DESCRIPTION
+    Installs a pre-push hook that mirrors eligible branch updates before an
+    ordinary `git push` to the primary.
+
+EXAMPLES
+    git-replicate hook install pre-push
+    git-replicate hook install pre-push --strict
+
+SAFETY
+    WARNING: Git has no post-push hook. The hook runs BEFORE the primary push and
+    cannot know whether it will succeed; mirrors may end up ahead of the primary.
+    Default is best-effort (report mirror failures, let the push continue).
+    --strict blocks the primary push on mirror failure, but a mirror may already
+    have changed. Hooks are local to this clone and bypassed by --no-verify.
+    Existing hooks are never overwritten; core.hooksPath is respected.

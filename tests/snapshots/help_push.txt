@@ -1,0 +1,26 @@
+Push a branch to the primary, then to every mirror (primary first)
+
+Usage: git-replicate push [OPTIONS]
+
+Options:
+      --branch <BRANCH>  Local branch to push (default: the current branch)
+      --uiless           Emit one JSON object per line (JSONL) on stdout; never prompt [env: GIT_REPLICATE_UILESS=]
+      --dry-run          Print the local plan only; no network access or remote changes
+      --verbose          Print redacted diagnostics to stderr
+      --no-color         Disable colored output (NO_COLOR and CLICOLOR=0 are also honored)
+  -h, --help             Print help
+
+DESCRIPTION
+    Pushes OID:refs/heads/BRANCH to the primary, then, only on success, the same
+    snapshotted commit to each mirror in order. A failing mirror does not stop the
+    others. Never forces, deletes, pushes tags, or pulls/commits/fetches.
+
+EXAMPLES
+    git-replicate push
+    git-replicate push --branch release/1.x
+    git-replicate push --dry-run
+
+SAFETY
+    --dry-run is a local plan only. Exit 3: primary failed (mirrors untouched).
+    Exit 4: primary succeeded but a mirror failed; fix access, then `retry`.
+    Remote updates are not atomic across remotes.

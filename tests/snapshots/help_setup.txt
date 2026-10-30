@@ -1,0 +1,29 @@
+Create or verify .gitreplicate and local mirror remotes (idempotent)
+
+Usage: git-replicate setup [OPTIONS]
+
+Options:
+      --primary <NAME>  Existing remote to use as the primary (required in automation if ambiguous)
+      --uiless          Emit one JSON object per line (JSONL) on stdout; never prompt [env: GIT_REPLICATE_UILESS=]
+      --verbose         Print redacted diagnostics to stderr
+      --yes             Approve creating missing local mirror remotes without prompting
+      --no-color        Disable colored output (NO_COLOR and CLICOLOR=0 are also honored)
+  -h, --help            Print help
+
+DESCRIPTION
+    Idempotent entry point. First run: choose the primary remote (origin if
+    present, else the only remote) and create .gitreplicate with its validated
+    push URL. In an existing clone: compare .gitreplicate with .git/config and
+    add only the missing mirror remotes after approval. When nothing is missing it
+    prints "Already set up; nothing to do" and changes nothing.
+
+EXAMPLES
+    git-replicate setup
+    git-replicate setup --primary origin --yes     # automation, primary-only config
+    git-replicate --uiless setup --yes             # CI: apply remotes from reviewed config
+
+SAFETY
+    Never contacts the network, never copies commits, never overwrites an
+    existing config or remote, never installs a hook. In --uiless mode it never
+    prompts: pass --primary when ambiguous and --yes before creating remotes.
+    Only run `setup --yes` after you trust the checked-out .gitreplicate.

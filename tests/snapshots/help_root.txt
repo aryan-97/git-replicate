@@ -1,0 +1,91 @@
+NAME
+    git-replicate - copy selected Git branch pushes from a primary remote to mirror remotes
+
+SYNOPSIS
+    git-replicate [--uiless] [--verbose] [--no-color] <COMMAND> [ARGS]
+    git-replicate help [COMMAND]
+
+DESCRIPTION
+    git-replicate pushes a branch to your primary remote first and, only if that
+    succeeds, pushes the exact same commit to each configured mirror remote
+    (GitHub, GitLab, Bitbucket, Gitea or any Git server reachable over SSH or
+    HTTPS). It matches selected branch refs; it is NOT `git push --mirror`.
+    By default only the current local branch is pushed: no tags, notes,
+    pull-request refs, deletions or force pushes, ever.
+
+    An ordinary `git push` is NOT mirrored unless you opt in to the pre-push hook
+    (`git-replicate hook install pre-push`). Hooks are local to one clone, are
+    not shared by cloning, and can be bypassed (`git push --no-verify`). Git has
+    no post-push hook, so only `git-replicate push` can guarantee that mirrors
+    are updated after the primary succeeded. Updates across remotes are not
+    atomic: a primary success followed by a mirror failure is reported as a
+    partial result (exit status 4) and can be repaired with `retry`.
+
+COMMANDS
+  setup   Create or verify .gitreplicate and local mirror remotes (idempotent)
+  mirror  Manage mirror entries (add, list, remove)
+  push    Push a branch to the primary, then to every mirror (primary first)
+  retry   Retry failed mirrors of the last partial push
+  status  Show configuration, recorded attempts and hook state
+  doctor  Diagnose configuration, remotes, hooks and authentication
+  hook    Manage the optional pre-push hook
+  help    Print this message or the help of the given subcommand(s)
+
+OPTIONS
+      --uiless    Emit one JSON object per line (JSONL) on stdout; never prompt [env: GIT_REPLICATE_UILESS=]
+      --verbose   Print redacted diagnostics to stderr
+      --no-color  Disable colored output (NO_COLOR and CLICOLOR=0 are also honored)
+  -h, --help      Print help
+  -V, --version   Print version
+
+EXAMPLES
+    git-replicate setup
+    git-replicate mirror add gitlab --url git@gitlab.com:team/project.git
+    git-replicate mirror add work --remote existing-work-remote
+    git-replicate doctor --check-remote
+    git-replicate push
+    git-replicate push --dry-run
+    git-replicate retry
+    git-replicate status --remote
+    git-replicate --uiless push          # JSON Lines on stdout, for CI
+
+EXIT STATUS
+    0   all selected writes succeeded (or a local dry-run plan succeeded)
+    2   usage, configuration or repository error (nothing was pushed)
+    3   primary push failed or its outcome is unknown
+    4   primary succeeded, but a mirror failed, is unknown, or could not be recorded
+    5   hook installation or conflict error
+    6   read-only remote check failed (doctor, status, retry pre-check)
+
+CONFIGURATION FILE
+    `.gitreplicate` is a UTF-8 TOML file in the worktree root. It may be
+    committed and reviewed. It holds expected push URLs, never credentials.
+
+        version = 1
+
+        [primary]
+        remote = "origin"
+        url = "git@github.com:team/project.git"
+
+        [[mirrors]]
+        name = "gitlab"
+        remote = "gitreplicate-gitlab"
+        url = "git@gitlab.com:team/project.git"
+
+    Only SSH (git@host:path, ssh://) and https:// URLs without embedded
+    credentials are accepted. If the push URL Git resolves for a remote differs
+    from the file (pushurl, url.*.insteadOf), the operation is refused.
+    Attempt records and a lock live in the Git common directory under
+    gitreplicate/ (never in tracked files).
+
+SECURITY
+    git-replicate never asks for, stores or prints passwords, tokens or SSH keys;
+    authentication is delegated to Git, SSH and your credential helpers. Network
+    commands run non-interactively (GIT_TERMINAL_PROMPT=0 and, unless you set
+    GIT_SSH_COMMAND, GIT_SSH or core.sshCommand, `ssh -o BatchMode=yes`). Unknown
+    SSH host keys are never auto-accepted. URL credentials are redacted from all
+    output. A cloned .gitreplicate is untrusted input: `setup` shows a plan and
+    needs approval (or --yes) before creating local remotes. LFS content and
+    external submodule repositories are not mirrored automatically.
+
+Use `git-replicate <COMMAND> --help` for command-specific help.
