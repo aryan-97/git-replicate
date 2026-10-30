@@ -1,0 +1,11 @@
+# git-replicate configuration. Contains no credentials; review changes before trusting.
+version = 1
+
+[primary]
+remote = "github"
+url = "git@github.com:aryan-97/git-replicate.git"
+
+[[mirrors]]
+name = "gitlab"
+remote = "gitreplicate-gitlab"
+url = "git@gitlab.com:aryanagarwal.dev/git-replicate.git"
