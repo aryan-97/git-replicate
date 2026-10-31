@@ -14,6 +14,8 @@ DESCRIPTION
     Pushes OID:refs/heads/BRANCH to the primary, then, only on success, the same
     snapshotted commit to each mirror in order. A failing mirror does not stop the
     others. Never forces, deletes, pushes tags, or pulls/commits/fetches.
+    The branch must be on the allowlist (see `git-replicate allowlist`); otherwise
+    nothing at all is pushed and the command exits 2.
 
 EXAMPLES
     git-replicate push
@@ -21,6 +23,6 @@ EXAMPLES
     git-replicate push --dry-run
 
 SAFETY
-    --dry-run is a local plan only. Exit 3: primary failed (mirrors untouched).
+    --dry-run is a local plan only (it still enforces the allowlist). Exit 3: primary failed (mirrors untouched).
     Exit 4: primary succeeded but a mirror failed; fix access, then `retry`.
     Remote updates are not atomic across remotes.

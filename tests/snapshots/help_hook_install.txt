@@ -27,3 +27,7 @@ SAFETY
     --strict blocks the primary push on mirror failure, but a mirror may already
     have changed. Hooks are local to this clone and bypassed by --no-verify.
     Existing hooks are never overwritten; core.hooksPath is respected.
+
+    ALLOWLIST: a push to the primary that includes a branch outside the allowlist
+    is blocked by the hook (in both modes, not only --strict) before anything is
+    mirrored, and the message names the `git-replicate allowlist add` command.

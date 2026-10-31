@@ -34,6 +34,16 @@ pub fn setup(ctx: &Ctx, a: SetupArgs) -> R<i32> {
     }
     let out = &ctx.out;
     let cfg = config::load(&repo.root)?;
+    if !a.allow_branch.is_empty() {
+        return Err(CliError::usage(format!(
+            "{} already exists; --allow-branch only applies to the first run",
+            config::FILE
+        ))
+        .hint("Use `git-replicate allowlist add PATTERN` to change the allowlist."));
+    }
+    if cfg.branches.is_empty() {
+        out.warning("the branch allowlist is empty, so every push will be denied. Add a branch with `git-replicate allowlist add BRANCH`");
+    }
     let remotes = repo.remotes()?;
     repo::check_remote(&repo, &remotes, &cfg.primary.remote, &cfg.primary.url)
         .map_err(|e| CliError::usage(format!("primary remote: {e}")))?;
@@ -166,8 +176,51 @@ fn first_run(ctx: &Ctx, repo: &Repo, a: SetupArgs) -> R<i32> {
         .hint("Use an SSH or HTTPS URL without embedded credentials (git remote set-url).")
     })?;
     let mut cfg = Config::new(&primary, &url);
+    for p in &a.allow_branch {
+        for q in crate::allow::parse_patterns(p).map_err(CliError::usage)? {
+            if !cfg.branches.contains(&q) {
+                cfg.branches.push(q);
+            }
+        }
+    }
+    if cfg.branches.is_empty() && interactive(ctx) && !a.yes {
+        let default = repo.current_branch();
+        for _ in 0..3 {
+            let q = match &default {
+                Some(d) => format!(
+                    "Branches to replicate (comma-separated names or patterns like release/*) [{d}]:"
+                ),
+                None => "Branches to replicate (comma-separated names or patterns like release/*):"
+                    .to_string(),
+            };
+            let Some(ans) = ask(&q) else { break };
+            let ans = if ans.is_empty() {
+                default.clone().unwrap_or_default()
+            } else {
+                ans
+            };
+            if ans.is_empty() {
+                break;
+            }
+            match crate::allow::parse_patterns(&ans) {
+                Ok(v) => {
+                    cfg.branches = v;
+                    break;
+                }
+                Err(e) => out.warning(&e),
+            }
+        }
+    }
     config::validate(&cfg).map_err(CliError::usage)?;
     config::create(&repo.root, &cfg)?;
+    if cfg.branches.is_empty() {
+        out.warning("no branches are allowlisted yet, so every push will be denied. Add one with `git-replicate allowlist add BRANCH`");
+    } else {
+        out.info(&format!(
+            "Allowlisted branches: {}",
+            cfg.branches.join(", ")
+        ));
+    }
     out.remote_result(
         &primary,
         None,

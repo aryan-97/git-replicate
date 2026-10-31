@@ -16,6 +16,12 @@ DESCRIPTION
     By default only the current local branch is pushed: no tags, notes,
     pull-request refs, deletions or force pushes, ever.
 
+    Only branches on the ALLOWLIST (names or patterns such as main, release/*)
+    are replicated. A push of any other branch is denied, both by
+    `git-replicate push` and by the pre-push hook, with the command to run if
+    you decide to allow it (`git-replicate allowlist add BRANCH`). The tool never
+    offers to add a branch for you: adding one is a deliberate, separate step.
+
     An ordinary `git push` is NOT mirrored unless you opt in to the pre-push hook
     (`git-replicate hook install pre-push`). Hooks are local to one clone, are
     not shared by cloning, and can be bypassed (`git push --no-verify`). Git has
@@ -34,6 +40,8 @@ EXAMPLES
     git-replicate setup
     git-replicate mirror add gitlab --url git@gitlab.com:team/project.git
     git-replicate mirror add work --remote existing-work-remote
+    git-replicate allowlist add main 'release/*'
+    git-replicate allowlist list
     git-replicate doctor --check-remote
     git-replicate push
     git-replicate push --dry-run
@@ -54,6 +62,7 @@ CONFIGURATION FILE
     committed and reviewed. It holds expected push URLs, never credentials.
 
         version = 1
+        branches = [\"main\", \"release/*\"]
 
         [primary]
         remote = \"origin\"
@@ -63,6 +72,10 @@ CONFIGURATION FILE
         name = \"gitlab\"
         remote = \"gitreplicate-gitlab\"
         url = \"git@gitlab.com:team/project.git\"
+
+    `branches` is the allowlist: exact branch names or patterns where `*` matches
+    within one path segment and `**` also across '/'. A missing or empty list
+    denies every push. Manage it with `git-replicate allowlist`.
 
     Only SSH (git@host:path, ssh://) and https:// URLs without embedded
     credentials are accepted. If the push URL Git resolves for a remote differs
@@ -114,6 +127,9 @@ pub enum Cmd {
     /// Manage mirror entries (add, list, remove)
     #[command(subcommand)]
     Mirror(MirrorCmd),
+    /// Manage the branch allowlist (add, remove, list, check)
+    #[command(subcommand)]
+    Allowlist(AllowlistCmd),
     /// Push a branch to the primary, then to every mirror (primary first)
     #[command(after_help = PUSH_HELP)]
     Push(PushArgs),
@@ -139,7 +155,59 @@ pub struct SetupArgs {
     /// Approve creating missing local mirror remotes without prompting
     #[arg(long)]
     pub yes: bool,
+    /// First run only: branch name or pattern to allow (repeatable, e.g. main, 'release/*')
+    #[arg(long = "allow-branch", value_name = "PATTERN")]
+    pub allow_branch: Vec<String>,
 }
+
+#[derive(Subcommand, Debug)]
+pub enum AllowlistCmd {
+    /// Allow branches (exact names or patterns such as 'release/*')
+    #[command(after_help = ALLOW_ADD_HELP)]
+    Add {
+        /// Branch names or patterns
+        #[arg(required = true, num_args = 1.., value_name = "PATTERN")]
+        patterns: Vec<String>,
+    },
+    /// Remove patterns from the allowlist (matched literally)
+    #[command(
+        after_help = "EXAMPLES\n    git-replicate allowlist remove 'release/*'\n\nSAFETY\n    Removing the last pattern denies every push until a branch is added again."
+    )]
+    Remove {
+        /// Patterns exactly as shown by `allowlist list`
+        #[arg(required = true, num_args = 1.., value_name = "PATTERN")]
+        patterns: Vec<String>,
+    },
+    /// List allowed patterns and whether the current branch is allowed
+    #[command(
+        after_help = "EXAMPLES\n    git-replicate allowlist list\n    git-replicate --uiless allowlist list\n\nSAFETY\n    Read-only; never contacts a remote."
+    )]
+    List,
+    /// Check whether a branch is allowed (exit 2 if it is not)
+    #[command(
+        after_help = "EXAMPLES\n    git-replicate allowlist check release/1.x\n\nSAFETY\n    Read-only; never contacts a remote."
+    )]
+    Check {
+        /// Branch name
+        branch: String,
+    },
+}
+
+const ALLOW_ADD_HELP: &str = "\
+DESCRIPTION
+    Only allowlisted branches are replicated. `git-replicate push` and the
+    pre-push hook deny every other branch. Patterns: an exact name (main), `*`
+    matching within one path segment (release/* matches release/1.x but not
+    release/1.x/fix) and `**` matching across '/' (feature/** ).
+
+EXAMPLES
+    git-replicate allowlist add main
+    git-replicate allowlist add main 'release/*' hotfix/**
+
+SAFETY
+    Quote patterns so your shell does not expand `*`. Adding a branch is a
+    deliberate step: git-replicate never offers to add one when a push is denied.
+    Commit .gitreplicate to share the allowlist with your team.";
 
 #[derive(Args, Debug)]
 pub struct PushArgs {
@@ -257,8 +325,14 @@ DESCRIPTION
     add only the missing mirror remotes after approval. When nothing is missing it
     prints \"Already set up; nothing to do\" and changes nothing.
 
+    On the first run it also asks which branches to replicate (the allowlist;
+    names or patterns like release/*, default: the current branch). In automation
+    pass --allow-branch PATTERN (repeatable). Without any allowlisted branch every
+    push is denied until you run `git-replicate allowlist add BRANCH`.
+
 EXAMPLES
     git-replicate setup
+    git-replicate setup --allow-branch main --allow-branch 'release/*'
     git-replicate setup --primary origin --yes     # automation, primary-only config
     git-replicate --uiless setup --yes             # CI: apply remotes from reviewed config
 
@@ -273,6 +347,8 @@ DESCRIPTION
     Pushes OID:refs/heads/BRANCH to the primary, then, only on success, the same
     snapshotted commit to each mirror in order. A failing mirror does not stop the
     others. Never forces, deletes, pushes tags, or pulls/commits/fetches.
+    The branch must be on the allowlist (see `git-replicate allowlist`); otherwise
+    nothing at all is pushed and the command exits 2.
 
 EXAMPLES
     git-replicate push
@@ -280,7 +356,7 @@ EXAMPLES
     git-replicate push --dry-run
 
 SAFETY
-    --dry-run is a local plan only. Exit 3: primary failed (mirrors untouched).
+    --dry-run is a local plan only (it still enforces the allowlist). Exit 3: primary failed (mirrors untouched).
     Exit 4: primary succeeded but a mirror failed; fix access, then `retry`.
     Remote updates are not atomic across remotes.";
 
@@ -360,7 +436,11 @@ SAFETY
     Default is best-effort (report mirror failures, let the push continue).
     --strict blocks the primary push on mirror failure, but a mirror may already
     have changed. Hooks are local to this clone and bypassed by --no-verify.
-    Existing hooks are never overwritten; core.hooksPath is respected.";
+    Existing hooks are never overwritten; core.hooksPath is respected.
+
+    ALLOWLIST: a push to the primary that includes a branch outside the allowlist
+    is blocked by the hook (in both modes, not only --strict) before anything is
+    mirrored, and the message names the `git-replicate allowlist add` command.";
 
 const HOOK_RUN_HELP: &str = "\
 DESCRIPTION
@@ -374,5 +454,6 @@ DESCRIPTION
         #  input=$(cat); printf '%s\\n' \"$input\" | git-replicate hook run pre-push \"$@\")
 
 SAFETY
-    Skips tags, deletions, non-branch refs and pushes to other remotes. Honors
+    Skips tags, deletions, non-branch refs and pushes to other remotes. Exits 2
+    (blocking the push) if a pushed branch is not on the allowlist. Honors
     GIT_REPLICATE_SKIP_HOOK=1. Never prompts. Never pushes to the primary.";

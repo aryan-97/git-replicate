@@ -186,7 +186,19 @@ fn topo() -> Topo {
     let (m2, u2) = env.bare("mirror2");
     env.git(&["remote", "add", "origin", &purl]);
     env.commit("one");
-    assert_eq!(env.run(&["setup"]).code, 0);
+    assert_eq!(
+        env.run(&[
+            "setup",
+            "--allow-branch",
+            "main",
+            "--allow-branch",
+            "feature/*",
+            "--allow-branch",
+            "side,renamed,wtb"
+        ])
+        .code,
+        0
+    );
     assert_eq!(env.run(&["mirror", "add", "one", "--url", &u1]).code, 0);
     assert_eq!(env.run(&["mirror", "add", "two", "--url", &u2]).code, 0);
     Topo {
@@ -968,4 +980,243 @@ fn secrets_never_appear_in_output() {
             "{args:?}"
         );
     }
+}
+
+fn only_main(e: &Env) {
+    let cfg = fs::read_to_string(e.work.join(".gitreplicate")).unwrap();
+    assert!(cfg.contains("branches = ["), "{cfg}");
+    for p in ["feature/*", "side", "renamed", "wtb"] {
+        assert_eq!(e.run(&["allowlist", "remove", p]).code, 0, "{p}");
+    }
+    assert_eq!(e.run(&["allowlist", "list"]).code, 0);
+}
+
+#[test]
+fn setup_records_allowlist_and_warns_when_empty() {
+    let t = topo();
+    let cfg = fs::read_to_string(t.env.work.join(".gitreplicate")).unwrap();
+    assert!(cfg.contains("\"main\"") && cfg.contains("\"feature/*\"") && cfg.contains("\"side\""));
+    let r = t.env.run(&["setup", "--allow-branch", "x"]);
+    assert_eq!(r.code, 2, "--allow-branch only on first run");
+
+    let e = Env::new();
+    let (_, purl) = e.bare("p");
+    e.git(&["remote", "add", "origin", &purl]);
+    let r = e.run(&["--uiless", "setup"]);
+    assert_eq!(r.code, 0);
+    assert!(r.out.contains("\"event\":\"warning\"") && r.out.contains("allowlist"));
+    assert!(
+        fs::read_to_string(e.work.join(".gitreplicate"))
+            .unwrap()
+            .contains("branches = []")
+    );
+    e.commit("c");
+    let r = e.run(&["--uiless", "push"]);
+    assert_eq!(r.code, 2);
+    assert!(
+        r.result()["message"]
+            .as_str()
+            .unwrap()
+            .contains("allowlist is empty")
+    );
+    let r = e.run(&["setup", "--allow-branch", "bad branch!"]);
+    assert_eq!(r.code, 2);
+    let e2 = Env::new();
+    let (_, purl2) = e2.bare("p2");
+    e2.git(&["remote", "add", "origin", &purl2]);
+    assert_eq!(
+        e2.run(&["setup", "--allow-branch", "a b"]).code,
+        0,
+        "space-separated list is accepted"
+    );
+    let r = e2.run(&["setup", "--allow-branch", "-x"]);
+    assert_eq!(r.code, 2);
+}
+
+#[test]
+fn allowlist_management() {
+    let t = topo();
+    let e = &t.env;
+    let r = e.run(&["--uiless", "allowlist", "list"]);
+    assert_eq!(r.code, 0);
+    assert!(!r.out.contains("release") && r.out.contains("feature/*"));
+    assert_eq!(
+        e.run(&["allowlist", "add", "release/*", "hotfix/**"]).code,
+        0
+    );
+    let r = e.run(&["--uiless", "allowlist", "add", "release/*"]);
+    assert_eq!(r.code, 0);
+    assert_eq!(r.result()["status"], "unchanged");
+    for bad in [
+        "",
+        "bad branch",
+        "-x",
+        "/lead",
+        "trail/",
+        "a..b",
+        "a//b",
+        "x***",
+        "we!rd",
+        "x.lock",
+    ] {
+        let r = e.run(&["allowlist", "add", bad]);
+        assert_eq!(r.code, 2, "{bad:?}");
+    }
+    assert_eq!(e.run(&["allowlist", "remove", "nope"]).code, 2);
+    assert_eq!(e.run(&["allowlist", "check", "release/1.x"]).code, 0);
+    assert_eq!(e.run(&["allowlist", "check", "hotfix/a/b"]).code, 0);
+    let r = e.run(&["allowlist", "check", "release/1.x/fix"]);
+    assert_eq!(r.code, 2, "single * does not cross '/'");
+    assert!(
+        r.err
+            .contains("git-replicate allowlist add 'release/1.x/fix'")
+    );
+    assert_eq!(e.run(&["allowlist", "check", "main2"]).code, 2);
+    assert_eq!(e.run(&["allowlist", "remove", "release/*"]).code, 0);
+    assert_eq!(e.run(&["allowlist", "check", "release/1.x"]).code, 2);
+    let human = e.run(&["allowlist", "list"]);
+    assert!(human.out.contains("Current branch 'main': allowed"));
+    let st = e.run(&["status"]);
+    assert!(st.out.contains("Branch allowlist: main"));
+    let d = e.run(&["doctor"]);
+    assert!(d.out.contains("branch allowlist: main"));
+}
+
+#[test]
+fn push_is_denied_for_branches_outside_allowlist() {
+    let t = topo();
+    let e = &t.env;
+    only_main(e);
+    e.git(&["checkout", "-q", "-b", "wip/secret"]);
+    e.commit("wip");
+    let r = e.run(&["push"]);
+    assert_eq!(r.code, 2, "{}{}", r.out, r.err);
+    assert!(r.err.contains("not in the replication allowlist"));
+    assert!(r.err.contains("git-replicate allowlist add 'wip/secret'"));
+    assert!(!r.err.to_lowercase().contains("add it now"));
+    assert!(
+        e.head(&t.primary, "wip/secret").is_none(),
+        "primary untouched"
+    );
+    assert!(e.head(&t.m1, "wip/secret").is_none() && e.head(&t.m2, "wip/secret").is_none());
+    assert_eq!(e.run(&["push", "--dry-run"]).code, 2);
+    let r = e.run(&["--uiless", "push", "--branch", "wip/secret"]);
+    assert_eq!(r.code, 2);
+    assert_eq!(r.result()["status"], "error");
+    assert!(!e.work.join(".git/gitreplicate/state.json").exists());
+    assert_eq!(e.run(&["retry"]).code, 2);
+
+    assert_eq!(e.run(&["allowlist", "add", "wip/*"]).code, 0);
+    assert_eq!(e.run(&["push"]).code, 0);
+    assert!(e.head(&t.m2, "wip/secret").is_some());
+}
+
+#[test]
+fn hook_denies_branches_outside_allowlist_in_both_modes() {
+    let t = topo();
+    let e = &t.env;
+    assert_eq!(e.run(&["hook", "install", "pre-push"]).code, 0);
+    e.git(&["push", "-q", "origin", "main"]);
+    assert!(e.head(&t.m1, "main").is_some());
+    e.git(&["checkout", "-q", "-b", "nope"]);
+    e.commit("n");
+    let r = sh_run(&e.work, "git", &["push", "origin", "nope"], &e.envs());
+    assert_ne!(r.code, 0, "best-effort hook still enforces the allowlist");
+    let all = format!("{}{}", r.out, r.err);
+    assert!(all.contains("not in the replication allowlist"), "{all}");
+    assert!(all.contains("git-replicate allowlist add 'nope'"));
+    assert!(e.head(&t.primary, "nope").is_none() && e.head(&t.m1, "nope").is_none());
+
+    let r = sh_run(
+        &e.work,
+        "git",
+        &["push", "origin", "main", "nope"],
+        &e.envs(),
+    );
+    assert_ne!(r.code, 0, "one denied branch blocks the whole push");
+    assert!(e.head(&t.m1, "nope").is_none());
+
+    let (other, ourl) = e.bare("other");
+    e.git(&["remote", "add", "other", &ourl]);
+    e.git(&["push", "-q", "other", "nope"]);
+    assert!(
+        e.head(&other, "nope").is_some(),
+        "pushes to other remotes are not governed"
+    );
+    e.git(&["tag", "v9"]);
+    e.git(&["push", "-q", "origin", "v9"]);
+
+    assert_eq!(e.run(&["hook", "uninstall", "pre-push"]).code, 0);
+    assert_eq!(e.run(&["hook", "install", "pre-push", "--strict"]).code, 0);
+    let r = sh_run(&e.work, "git", &["push", "origin", "nope"], &e.envs());
+    assert_ne!(r.code, 0);
+    assert_eq!(e.run(&["allowlist", "add", "nope"]).code, 0);
+    e.git(&["push", "-q", "origin", "nope"]);
+    assert!(e.head(&t.m1, "nope").is_some());
+}
+
+#[test]
+fn hook_allowlist_uses_destination_branch_and_json() {
+    let t = topo();
+    let e = &t.env;
+    assert_eq!(e.run(&["hook", "install", "pre-push"]).code, 0);
+    e.git(&["checkout", "-q", "-b", "scratch"]);
+    e.commit("s");
+    let r = sh_run(
+        &e.work,
+        "git",
+        &["push", "origin", "scratch:renamed"],
+        &e.envs(),
+    );
+    assert_eq!(
+        r.code, 0,
+        "destination 'renamed' is allowlisted: {}{}",
+        r.out, r.err
+    );
+    assert!(e.head(&t.m1, "renamed").is_some());
+    let r = sh_run(
+        &e.work,
+        "git",
+        &["push", "origin", "scratch:other"],
+        &e.envs(),
+    );
+    assert_ne!(r.code, 0);
+    let mut env = e.envs();
+    env.push(("GIT_REPLICATE_UILESS", "1".into()));
+    let oid = e.git(&["rev-parse", "HEAD"]).out.trim().to_string();
+    let purl = e
+        .git(&["remote", "get-url", "origin"])
+        .out
+        .trim()
+        .to_string();
+    let mut c = Command::new(BIN);
+    c.args(["hook", "run", "pre-push", "origin", &purl])
+        .current_dir(&e.work)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (k, v) in &env {
+        c.env(k, v);
+    }
+    let mut child = c.spawn().unwrap();
+    use std::io::Write;
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(
+            format!(
+                "refs/heads/scratch {oid} refs/heads/blocked {}\n",
+                "0".repeat(40)
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+    let o = child.wait_with_output().unwrap();
+    assert_eq!(o.status.code(), Some(2));
+    let last: serde_json::Value =
+        serde_json::from_str(String::from_utf8_lossy(&o.stdout).lines().last().unwrap()).unwrap();
+    assert_eq!(last["status"], "error");
+    assert_eq!(last["code"], 2);
 }

@@ -375,6 +375,16 @@ pub fn run(ctx: &Ctx, strict: bool, args: Vec<String>) -> R<i32> {
     if eligible.is_empty() {
         return skipped(ctx, "no eligible branch updates to mirror");
     }
+    let denied: Vec<String> = eligible
+        .keys()
+        .map(|r| r.trim_start_matches("refs/heads/").to_string())
+        .filter(|b| crate::config::allowed_by(&cfg, b).is_none())
+        .collect();
+    if !denied.is_empty() {
+        let mut e = crate::allow::denied(&cfg, &denied);
+        e.msg = format!("push to the primary blocked: {}", e.msg);
+        return Err(e);
+    }
     if cfg.mirrors.is_empty() {
         return skipped(ctx, "no mirrors configured");
     }

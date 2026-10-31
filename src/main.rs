@@ -1,3 +1,4 @@
+mod allow;
 mod cli;
 mod config;
 mod diag;
@@ -12,7 +13,7 @@ mod util;
 
 use clap::Parser;
 use clap::error::ErrorKind;
-use cli::{Cli, Cmd, HookCmd, MirrorCmd};
+use cli::{AllowlistCmd, Cli, Cmd, HookCmd, MirrorCmd};
 use out::{CliError, Out};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -63,6 +64,10 @@ fn main() -> ExitCode {
         Cmd::Mirror(MirrorCmd::Add { .. }) => "mirror add",
         Cmd::Mirror(MirrorCmd::List) => "mirror list",
         Cmd::Mirror(MirrorCmd::Remove { .. }) => "mirror remove",
+        Cmd::Allowlist(AllowlistCmd::Add { .. }) => "allowlist add",
+        Cmd::Allowlist(AllowlistCmd::Remove { .. }) => "allowlist remove",
+        Cmd::Allowlist(AllowlistCmd::List) => "allowlist list",
+        Cmd::Allowlist(AllowlistCmd::Check { .. }) => "allowlist check",
         Cmd::Push(_) => "push",
         Cmd::Retry(_) => "retry",
         Cmd::Status(_) => "status",
@@ -91,6 +96,10 @@ fn main() -> ExitCode {
             setup::mirror_add(&ctx, &name, url, remote)
         }
         Cmd::Mirror(MirrorCmd::List) => setup::mirror_list(&ctx),
+        Cmd::Allowlist(AllowlistCmd::Add { patterns }) => allow::add(&ctx, patterns),
+        Cmd::Allowlist(AllowlistCmd::Remove { patterns }) => allow::remove(&ctx, patterns),
+        Cmd::Allowlist(AllowlistCmd::List) => allow::list(&ctx),
+        Cmd::Allowlist(AllowlistCmd::Check { branch }) => allow::check(&ctx, &branch),
         Cmd::Mirror(MirrorCmd::Remove {
             name,
             remove_managed_remote,

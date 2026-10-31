@@ -11,6 +11,8 @@ git-replicate retry           # repair failed mirrors without force
 git-replicate status --remote
 ```
 
+**Branch allowlist:** only branches listed in `.gitreplicate` (`branches = ["main", "release/*"]`) are replicated; `push` and the pre-push hook deny everything else. Manage it with `git-replicate allowlist add|remove|list|check`; `setup --allow-branch PATTERN` seeds it. A config without branches denies every push until you add one.
+
 **An ordinary `git push` is not mirrored** unless you opt in with `git-replicate hook install pre-push`. Git has no post-push hook, so the hook runs before the primary push and cannot know it will succeed. Hooks are per clone and skipped by `--no-verify`.
 
 Build and verify: `cargo build --release`, `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` (help snapshots: `UPDATE_SNAPSHOTS=1 cargo test`). Put the binary on `PATH` as `git-replicate` (the hook looks it up there).

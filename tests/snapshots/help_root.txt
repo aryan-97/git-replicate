@@ -13,6 +13,12 @@ DESCRIPTION
     By default only the current local branch is pushed: no tags, notes,
     pull-request refs, deletions or force pushes, ever.
 
+    Only branches on the ALLOWLIST (names or patterns such as main, release/*)
+    are replicated. A push of any other branch is denied, both by
+    `git-replicate push` and by the pre-push hook, with the command to run if
+    you decide to allow it (`git-replicate allowlist add BRANCH`). The tool never
+    offers to add a branch for you: adding one is a deliberate, separate step.
+
     An ordinary `git push` is NOT mirrored unless you opt in to the pre-push hook
     (`git-replicate hook install pre-push`). Hooks are local to one clone, are
     not shared by cloning, and can be bypassed (`git push --no-verify`). Git has
@@ -22,14 +28,15 @@ DESCRIPTION
     partial result (exit status 4) and can be repaired with `retry`.
 
 COMMANDS
-  setup   Create or verify .gitreplicate and local mirror remotes (idempotent)
-  mirror  Manage mirror entries (add, list, remove)
-  push    Push a branch to the primary, then to every mirror (primary first)
-  retry   Retry failed mirrors of the last partial push
-  status  Show configuration, recorded attempts and hook state
-  doctor  Diagnose configuration, remotes, hooks and authentication
-  hook    Manage the optional pre-push hook
-  help    Print this message or the help of the given subcommand(s)
+  setup      Create or verify .gitreplicate and local mirror remotes (idempotent)
+  mirror     Manage mirror entries (add, list, remove)
+  allowlist  Manage the branch allowlist (add, remove, list, check)
+  push       Push a branch to the primary, then to every mirror (primary first)
+  retry      Retry failed mirrors of the last partial push
+  status     Show configuration, recorded attempts and hook state
+  doctor     Diagnose configuration, remotes, hooks and authentication
+  hook       Manage the optional pre-push hook
+  help       Print this message or the help of the given subcommand(s)
 
 OPTIONS
       --uiless    Emit one JSON object per line (JSONL) on stdout; never prompt [env: GIT_REPLICATE_UILESS=]
@@ -42,6 +49,8 @@ EXAMPLES
     git-replicate setup
     git-replicate mirror add gitlab --url git@gitlab.com:team/project.git
     git-replicate mirror add work --remote existing-work-remote
+    git-replicate allowlist add main 'release/*'
+    git-replicate allowlist list
     git-replicate doctor --check-remote
     git-replicate push
     git-replicate push --dry-run
@@ -62,6 +71,7 @@ CONFIGURATION FILE
     committed and reviewed. It holds expected push URLs, never credentials.
 
         version = 1
+        branches = ["main", "release/*"]
 
         [primary]
         remote = "origin"
@@ -71,6 +81,10 @@ CONFIGURATION FILE
         name = "gitlab"
         remote = "gitreplicate-gitlab"
         url = "git@gitlab.com:team/project.git"
+
+    `branches` is the allowlist: exact branch names or patterns where `*` matches
+    within one path segment and `**` also across '/'. A missing or empty list
+    denies every push. Manage it with `git-replicate allowlist`.
 
     Only SSH (git@host:path, ssh://) and https:// URLs without embedded
     credentials are accepted. If the push URL Git resolves for a remote differs

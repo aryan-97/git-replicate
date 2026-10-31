@@ -121,6 +121,7 @@ pub fn push(ctx: &Ctx, branch: Option<String>, dry: bool) -> R<i32> {
     let cfg = config::load(&repo.root)?;
     repo::check_dest(&repo, &cfg)?;
     let (name, oid) = repo::resolve_branch(&repo, branch.as_deref())?;
+    crate::allow::enforce(&cfg, &name)?;
     let refname = format!("refs/heads/{name}");
     if dry {
         out.plan(
@@ -309,6 +310,7 @@ pub fn retry(ctx: &Ctx, branch: Option<String>) -> R<i32> {
             CliError::usage("HEAD is detached; no current branch").hint("Pass --branch BRANCH.")
         })?,
     };
+    crate::allow::enforce(&cfg, &name)?;
     let refname = format!("refs/heads/{name}");
     let _lock = Lock::acquire(&repo, LOCK_WAIT)?;
     let mut st = state::load(&repo)?;

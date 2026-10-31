@@ -147,6 +147,11 @@ pub fn status(ctx: &Ctx, remote: bool) -> R<i32> {
         HookState::Foreign => "a different pre-push hook exists".into(),
     };
     out.info(&format!("pre-push hook: {hs}"));
+    out.info(&if cfg.branches.is_empty() {
+        "Branch allowlist: EMPTY (every push is denied; add one with `git-replicate allowlist add BRANCH`)".to_string()
+    } else {
+        format!("Branch allowlist: {}", cfg.branches.join(", "))
+    });
     if !remote {
         out.info("No network used. Add --remote for read-only ls-remote checks.");
     }
@@ -237,6 +242,15 @@ pub fn doctor(ctx: &Ctx, check_remote: bool) -> R<i32> {
     };
     let mut ok_remotes: Vec<(String, String)> = Vec::new();
     if let Some(cfg) = &cfg {
+        if cfg.branches.is_empty() {
+            out.check(None, "warn", "branch allowlist is empty: every push is denied. Add a branch with `git-replicate allowlist add BRANCH`");
+        } else {
+            out.check(
+                None,
+                "ok",
+                &format!("branch allowlist: {}", cfg.branches.join(", ")),
+            );
+        }
         local_bad |= local_checks(ctx, &repo, cfg);
         let remotes = repo.remotes().unwrap_or_default();
         for (_, name, url) in entries(cfg) {

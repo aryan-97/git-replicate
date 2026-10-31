@@ -50,6 +50,15 @@ Use `clap` with help and examples. Root flags `--uiless`, `--verbose` (redacted 
 
 For `push`, do not offer arbitrary raw Git arguments in v1. Users with advanced refspecs can use Git directly; supporting them safely requires a separate explicit design. No implicit `git add`, `commit`, `fetch`, `pull`, `push --all`, `push --tags`, `--force`, `--mirror`, or remote creation.
 
+## Branch allowlist (v1 extension)
+
+Only allowlisted branches are replicated. `.gitreplicate` holds `branches = ["main", "release/*"]`: exact names or patterns where `*` matches within one path segment and `**` also across `/` (characters limited to letters, digits and `. _ - / + @ *`). A missing or empty list denies every push.
+
+- `setup` asks which branches to allow on the first run (default: the current branch); automation passes `--allow-branch PATTERN` (repeatable, comma/space separated lists accepted). It never prompts on an existing config.
+- `allowlist add PATTERN...`, `allowlist remove PATTERN...` (literal match), `allowlist list`, `allowlist check BRANCH` manage it; `status` and `doctor` display it.
+- `push`, `push --dry-run` and `retry` refuse a non-allowlisted branch with exit `2` before any network write. The pre-push hook blocks the whole push (in best-effort and strict mode alike, exit `2`) if any pushed branch is not allowlisted, judged by the destination branch name; tags, deletions and pushes to other remotes are not governed.
+- The error names the exact `git-replicate allowlist add 'BRANCH'` command. The tool deliberately never offers to add the branch interactively: a separate command gives the user time to decide whether the branch should be published to every mirror.
+
 ## Configuration and state
 
 `.gitreplicate` is a UTF-8 TOML file in the Git **worktree root**, not the invocation directory. It may be committed and reviewed. Example:

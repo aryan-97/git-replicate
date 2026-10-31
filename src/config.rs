@@ -29,15 +29,71 @@ pub struct Mirror {
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub version: u32,
+    #[serde(default)]
+    pub branches: Vec<String>,
     pub primary: Primary,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mirrors: Vec<Mirror>,
+}
+
+pub const MAX_PATTERNS: usize = 64;
+pub const MAX_PATTERN_LEN: usize = 100;
+
+pub fn validate_pattern(p: &str) -> Result<(), String> {
+    let bad = |why: &str| Err(format!("invalid branch pattern '{p}': {why}"));
+    if p.is_empty() || p.len() > MAX_PATTERN_LEN {
+        return bad(&format!("must be 1-{MAX_PATTERN_LEN} characters"));
+    }
+    if !p
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || "._-/+@*".contains(c))
+    {
+        return bad("only letters, digits and . _ - / + @ * are allowed");
+    }
+    if p.starts_with(['-', '/']) || p.ends_with('/') || p.ends_with(".lock") {
+        return bad("must not start with '-' or '/', or end with '/' or '.lock'");
+    }
+    if p.contains("//") || p.contains("..") || p.contains("***") || p == "@" {
+        return bad("contains an unsupported sequence ('//', '..', '***')");
+    }
+    Ok(())
+}
+
+fn glob(p: &[u8], s: &[u8]) -> bool {
+    match p.first() {
+        None => s.is_empty(),
+        Some(b'*') if p.get(1) == Some(&b'*') => (0..=s.len()).any(|i| glob(&p[2..], &s[i..])),
+        Some(b'*') => {
+            for i in 0..=s.len() {
+                if glob(&p[1..], &s[i..]) {
+                    return true;
+                }
+                if i < s.len() && s[i] == b'/' {
+                    break;
+                }
+            }
+            false
+        }
+        Some(c) => s.first() == Some(c) && glob(&p[1..], &s[1..]),
+    }
+}
+
+pub fn glob_match(pattern: &str, branch: &str) -> bool {
+    glob(pattern.as_bytes(), branch.as_bytes())
+}
+
+pub fn allowed_by<'a>(cfg: &'a Config, branch: &str) -> Option<&'a str> {
+    cfg.branches
+        .iter()
+        .map(String::as_str)
+        .find(|p| glob_match(p, branch))
 }
 
 impl Config {
     pub fn new(remote: &str, url: &str) -> Config {
         Config {
             version: 1,
+            branches: vec![],
             primary: Primary {
                 remote: remote.into(),
                 url: url.into(),
@@ -56,6 +112,15 @@ pub fn validate(c: &Config) -> Result<(), String> {
     }
     if c.mirrors.len() > MAX_MIRRORS {
         return Err(format!("too many mirrors (max {MAX_MIRRORS})"));
+    }
+    if c.branches.len() > MAX_PATTERNS {
+        return Err(format!("too many branch patterns (max {MAX_PATTERNS})"));
+    }
+    for (i, p) in c.branches.iter().enumerate() {
+        validate_pattern(p)?;
+        if c.branches[..i].contains(p) {
+            return Err(format!("duplicate branch pattern '{p}'"));
+        }
     }
     if !valid_ident(&c.primary.remote, MAX_REMOTE) {
         return Err(format!(
@@ -171,4 +236,42 @@ pub fn save(root: &Path, c: &Config) -> R<()> {
     validate(c).map_err(CliError::usage)?;
     write_atomic(&root.join(FILE), render(c)?.as_bytes(), 0o644)
         .map_err(|e| CliError::usage(format!("could not write {FILE}: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn globbing() {
+        for (p, b, want) in [
+            ("main", "main", true),
+            ("main", "main2", false),
+            ("release/*", "release/1.x", true),
+            ("release/*", "release/1.x/fix", false),
+            ("release/*", "release", false),
+            ("release/**", "release/1/2/3", true),
+            ("feature/*-x", "feature/a-x", true),
+            ("feature/*-x", "feature/a/b-x", false),
+            ("*", "main", true),
+            ("*", "a/b", false),
+            ("**", "a/b/c", true),
+            ("a*c", "abbbc", true),
+            ("a*c", "abbbd", false),
+        ] {
+            assert_eq!(glob_match(p, b), want, "{p} vs {b}");
+        }
+    }
+
+    #[test]
+    fn patterns() {
+        for ok in ["main", "release/*", "hotfix/**", "v1.2+x", "user@x"] {
+            assert!(validate_pattern(ok).is_ok(), "{ok}");
+        }
+        for bad in [
+            "", " ", "-a", "/a", "a/", "a..b", "a//b", "a***", "a b", "a!b", "x.lock", "@",
+        ] {
+            assert!(validate_pattern(bad).is_err(), "{bad:?}");
+        }
+    }
 }

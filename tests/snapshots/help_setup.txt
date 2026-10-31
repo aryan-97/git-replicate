@@ -3,12 +3,13 @@ Create or verify .gitreplicate and local mirror remotes (idempotent)
 Usage: git-replicate setup [OPTIONS]
 
 Options:
-      --primary <NAME>  Existing remote to use as the primary (required in automation if ambiguous)
-      --uiless          Emit one JSON object per line (JSONL) on stdout; never prompt [env: GIT_REPLICATE_UILESS=]
-      --verbose         Print redacted diagnostics to stderr
-      --yes             Approve creating missing local mirror remotes without prompting
-      --no-color        Disable colored output (NO_COLOR and CLICOLOR=0 are also honored)
-  -h, --help            Print help
+      --primary <NAME>          Existing remote to use as the primary (required in automation if ambiguous)
+      --uiless                  Emit one JSON object per line (JSONL) on stdout; never prompt [env: GIT_REPLICATE_UILESS=]
+      --verbose                 Print redacted diagnostics to stderr
+      --yes                     Approve creating missing local mirror remotes without prompting
+      --allow-branch <PATTERN>  First run only: branch name or pattern to allow (repeatable, e.g. main, 'release/*')
+      --no-color                Disable colored output (NO_COLOR and CLICOLOR=0 are also honored)
+  -h, --help                    Print help
 
 DESCRIPTION
     Idempotent entry point. First run: choose the primary remote (origin if
@@ -17,8 +18,14 @@ DESCRIPTION
     add only the missing mirror remotes after approval. When nothing is missing it
     prints "Already set up; nothing to do" and changes nothing.
 
+    On the first run it also asks which branches to replicate (the allowlist;
+    names or patterns like release/*, default: the current branch). In automation
+    pass --allow-branch PATTERN (repeatable). Without any allowlisted branch every
+    push is denied until you run `git-replicate allowlist add BRANCH`.
+
 EXAMPLES
     git-replicate setup
+    git-replicate setup --allow-branch main --allow-branch 'release/*'
     git-replicate setup --primary origin --yes     # automation, primary-only config
     git-replicate --uiless setup --yes             # CI: apply remotes from reviewed config
 
