@@ -1,5 +1,6 @@
 # git-replicate configuration. Contains no credentials; review changes before trusting.
 version = 1
+branches = ["main"]
 
 [primary]
 remote = "github"
